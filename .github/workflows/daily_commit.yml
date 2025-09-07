@@ -1,0 +1,74 @@
+name: Random daily commits
+
+on:
+  schedule:
+    - cron: '0 6 * * *'    # 06:00 UTC
+    - cron: '0 12 * * *'   # 12:00 UTC
+    - cron: '0 18 * * *'   # 18:00 UTC
+    - cron: '0 23 * * *'   # 23:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  # One run at a time per branch; later runs cancel earlier ones
+  group: random-commit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Random delay (0–90 min)
+        run: |
+          delay=$((RANDOM % 5400))
+          echo "Sleeping $delay seconds to randomize start time..."
+          sleep "$delay"
+
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Configure Git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase onto remote (pre-change)
+        run: |
+          branch="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF:-main}}"
+          git fetch origin "$branch"
+          git checkout "$branch"
+          git pull --rebase --autostash origin "$branch"
+
+      - name: Update timestamp (creates a change)
+        run: |
+          echo "Last run: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > .daily-timestamp.txt
+
+      - name: Commit (if changed)
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Automated commit: $(date -u +'%Y-%m-%d %H:%M:%S')"
+
+      - name: Push with retry (handles races)
+        run: |
+          branch="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF:-main}}"
+          for i in 1 2 3; do
+            if git push origin "$branch"; then
+              echo "Push succeeded."
+              exit 0
+            fi
+            echo "Push failed (attempt $i). Re-pulling and retrying..."
+            git pull --rebase --autostash origin "$branch"
+            sleep 5
+          done
+          echo "Push failed after retries."
+          exit 1
