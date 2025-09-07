@@ -1,0 +1,33 @@
+name: Daily commit
+
+on:
+  schedule:
+    # Runs daily at 13:00 UTC (~8:00 AM Central during Daylight Saving Time)
+    - cron: '0 13 * * *'
+  workflow_dispatch: {}  # allow manual runs
+
+permissions:
+  contents: write  # needed to push with GITHUB_TOKEN
+
+concurrency:
+  group: daily-commit
+  cancel-in-progress: true
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update timestamp (makes a change we can commit)
+        run: |
+          echo "Last run: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > .daily-timestamp.txt
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Automated daily commit: $(date -u +'%Y-%m-%d')" || echo "No changes to commit"
+          git push
